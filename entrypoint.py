@@ -5,30 +5,47 @@ import os
 import psycopg2 as pg
 
 
-#Секреты MySQL
+def get_mysql_credentials():
+    """Get MySQL credentials from environment variables."""
+    required_vars = ["user_mysql", "password_mysql", "host_mysql", "port_mysql", "db_mysql"]
+    credentials = {}
+    
+    for var in required_vars:
+        value = os.environ.get(var)
+        if value is None:
+            raise ValueError(f"Environment variable {var} is not set")
+        credentials[var] = value
+    
+    return credentials
 
 
-# Из окружения
-user_mysql = os.environ["user_mysql"]
-password_mysql = os.environ["password_mysql"]
-host_mysql = os.environ["host_mysql"]
-port_mysql = os.environ["port_mysql"]
-db_mysql = os.environ["db_mysql"]
+def get_postgres_credentials():
+    """Get PostgreSQL credentials from environment variables."""
+    required_vars = ["user_postgres", "password_postgres", "host_postgres", "port_postgres", "db_postgres"]
+    credentials = {}
+    
+    for var in required_vars:
+        value = os.environ.get(var)
+        if value is None:
+            raise ValueError(f"Environment variable {var} is not set")
+        credentials[var] = value
+    
+    return credentials
 
 
-# Секреты Postgres
+def create_mysql_engine(credentials):
+    """Create MySQL engine from credentials."""
+    return f"mysql+pymysql://{credentials['user_mysql']}:{credentials['password_mysql']}@{credentials['host_mysql']}:{credentials['port_mysql']}/{credentials['db_mysql']}"
 
-# Из окружения
-user_postgres = os.environ["user_postgres"]
-password_postgres = os.environ["password_postgres"]
-host_postgres = os.environ["host_postgres"]
-port_postgres = os.environ["port_postgres"]
-db_postgres = os.environ["db_postgres"]
 
-def main():
+def create_postgres_engine(credentials):
+    """Create PostgreSQL engine from credentials."""
+    return create_engine(f"postgresql+psycopg2://{credentials['user_postgres']}:{credentials['password_postgres']}@{credentials['host_postgres']}:{credentials['port_postgres']}/{credentials['db_postgres']}")
 
-    # Выгрузка за сегодня из MySQL
-    select = '''
+
+def get_vni_query():
+    """Get the VNI SQL query."""
+    return '''
     WITH three_left_cols AS 
     (    
         SELECT 
@@ -395,12 +412,41 @@ def main():
     WHERE t_city_with_noname.start_day = DATE_FORMAT(NOW(), '%%Y-%%m-%%d')
     '''
 
-    engine_mysql = f"mysql+pymysql://{user_mysql}:{password_mysql}@{host_mysql}:{port_mysql}/{db_mysql}"
-    df_vni = pd.read_sql(select, engine_mysql)
 
-    # Загрузка за сегодня в Postgres
-    engine_postgresql = create_engine(f"mysql+pymysql://{user_postgres}:{password_postgres}@{host_postgres}:{port_postgres}/{db_postgres}")
-    df_vni.to_sql('vni_total', engine_postgresql, if_exists='append', index=False)
+def extract_data_from_mysql(mysql_engine_string, query):
+    """Extract data from MySQL using the provided query."""
+    return pd.read_sql(query, mysql_engine_string)
+
+
+def load_data_to_postgres(df, postgres_engine, table_name='vni_total'):
+    """Load DataFrame to PostgreSQL table."""
+    df.to_sql(table_name, postgres_engine, if_exists='append', index=False)
+
+
+def main():
+    """Main function to extract data from MySQL and load to PostgreSQL."""
+    try:
+        # Get credentials
+        mysql_creds = get_mysql_credentials()
+        postgres_creds = get_postgres_credentials()
+        
+        # Create engines
+        mysql_engine_string = create_mysql_engine(mysql_creds)
+        postgres_engine = create_postgres_engine(postgres_creds)
+        
+        # Get query and extract data
+        query = get_vni_query()
+        df_vni = extract_data_from_mysql(mysql_engine_string, query)
+        
+        # Load data to PostgreSQL
+        load_data_to_postgres(df_vni, postgres_engine)
+        
+        print(f"Successfully processed {len(df_vni)} rows")
+        
+    except Exception as e:
+        print(f"Error in main execution: {e}")
+        raise
+
 
 if __name__ == "__main__":
     main()
